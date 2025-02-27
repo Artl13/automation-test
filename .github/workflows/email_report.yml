@@ -78,7 +78,7 @@ jobs:
           PASSED_COUNT=$(jq '[.suites // [] | map(.specs // [] | map(.tests // [] | map(.results // [] | map(select(.status? == "passed")))))] | flatten | length' playwright-report/playwright-report.json | tr -d '[:space:]')
           SKIPPED_COUNT=$(jq '[.suites // [] | map(.specs // [] | map(.tests // [] | map(.results // [] | map(select(.status? == "skipped")))))] | flatten | length' playwright-report/playwright-report.json | tr -d '[:space:]')
 
-          TESTS_RUN=$(jq '[.suites // [] | map(.specs // [] | map(.tests // [] | map(.results // [] | map(.status? | if . then 3 else 0 end))))] | flatten | add' playwright-report/playwright-report.json | tr -d '[:space:]')
+          TESTS_RUN=$(jq '[.suites // [] | map(.specs // [] | map(.tests // [] | map(.results // [] | length) | add))] | flatten | add' playwright-report/playwright-report.json | tr -d '[:space:]')
 
 
           if [ "$FAILED_COUNT" -gt 0 ]; then
