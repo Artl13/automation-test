@@ -1,0 +1,282 @@
+name: Send Playwright Test Report
+
+on:
+  workflow_run:
+    workflows: ["Playwright Tests"]
+    types:
+      - completed
+  workflow_dispatch:
+
+jobs:
+  send_email:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    env:
+      REPORT_DATE: ""
+      EMOJI: "✅"
+      PASSED_COUNT: "0"
+      FAILED_COUNT: "0"
+      SKIPPED_COUNT: "0"
+      TESTS_RUN: "0"
+
+    steps:
+      - name: Check day of week
+        if: github.event_name != 'workflow_dispatch'
+        run: |
+          DAY_OF_WEEK=$(date -u +%w)  # 0 = Sunday, 5 = Friday, 6 = Saturday
+          if [ "$DAY_OF_WEEK" -eq 5 ] || [ "$DAY_OF_WEEK" -eq 6 ]; then
+            echo "Skipping email report - it's Friday or Saturday"
+            exit 0
+          fi
+
+      - name: Wait 5 minutes after Playwright Tests
+        if: github.event_name != 'workflow_dispatch'
+        run: |
+          echo "Waiting 5 minutes before sending the report..."
+          sleep 300  # 300 seconds = 5 minutes
+
+      - name: Set Date Variable
+        run: echo "REPORT_DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+
+      - name: Download Playwright Report
+        uses: actions/download-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Verify Downloaded Artifact
+        run: |
+          ls -la playwright-report/
+          echo "Checking subdirectories..."
+          ls -la playwright-report/data/ || echo "No data directory"
+          ls -la playwright-report/trace/ || echo "No trace directory"
+          if [ ! -d "playwright-report" ] || [ -z "$(ls -A playwright-report/)" ]; then
+            echo "Error: playwright-report directory is empty or missing!"
+            exit 1
+          fi
+
+      - name: Convert Playwright Report to CSV with Date
+        run: |
+          REPORT_FILE="automation-test-report-${{ env.REPORT_DATE }}.csv"
+          echo "Suite Name,Test Name,Status,Duration (ms),Error Message" > "$REPORT_FILE"
+          jq -r '
+            (.suites // [])[] as $suite |
+            ($suite.specs // [])[] as $spec |
+            ($spec.tests // [])[] as $test |
+            ($test.results // [])[] |
+            [$suite.title, $spec.title, (.status // "unknown"), .duration, ((.errors // []) | if length > 0 then .[0].message else "N/A" end)] | join(",")
+          ' playwright-report/playwright-report.json >> "$REPORT_FILE"
+          echo "CSV Report saved as $REPORT_FILE"
+
+      - name: Determine Test Status Emoji
+        id: test_status
+        run: |
+          FAILED_COUNT=$(jq '[.suites // [] | map(.specs // [] | map(.tests // [] | map(.results // [] | map(select(.status? | IN("failed", "timedOut", "flaky"))))))] | flatten | length' playwright-report/playwright-report.json | tr -d '[:space:]')
+          PASSED_COUNT=$(jq '[.suites // [] | map(.specs // [] | map(.tests // [] | map(.results // [] | map(select(.status? == "passed")))))] | flatten | length' playwright-report/playwright-report.json | tr -d '[:space:]')
+          SKIPPED_COUNT=$(jq '[.suites // [] | map(.specs // [] | map(.tests // [] | map(.results // [] | map(select(.status? == "skipped")))))] | flatten | length' playwright-report/playwright-report.json | tr -d '[:space:]')
+
+          TESTS_RUN=$(jq '[.suites // [] | map(.specs // [] | map(.tests // [] | map(.results // [] | map(.status? | if . then 3 else 0 end))))] | flatten | add' playwright-report/playwright-report.json | tr -d '[:space:]')
+
+          if [ "$FAILED_COUNT" -gt 0 ]; then
+            echo "EMOJI=❌" >> $GITHUB_ENV
+          else
+            echo "EMOJI=✅" >> $GITHUB_ENV
+          fi
+          
+          echo "PASSED_COUNT=$PASSED_COUNT" >> $GITHUB_ENV
+          echo "FAILED_COUNT=$FAILED_COUNT" >> $GITHUB_ENV
+          echo "SKIPPED_COUNT=$SKIPPED_COUNT" >> $GITHUB_ENV
+          echo "TESTS_RUN=$TESTS_RUN" >> $GITHUB_ENV
+          echo "Debug: Failed count = $FAILED_COUNT, Passed count = $PASSED_COUNT, Skipped count = $SKIPPED_COUNT"
+
+      - name: Send Email with CSV Report
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.sendgrid.net
+          server_port: 587
+          secure: false  
+          username: apikey 
+          password: ${{ secrets.SENDGRID_API_KEY }} 
+          subject: "${{ env.EMOJI }} Automation Testing Report - ${{ env.REPORT_DATE }} (Passed: ${{ env.PASSED_COUNT }}, Failed: ${{ env.FAILED_COUNT }})"
+          html_body: |
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Automation Test Report</title>
+              <style>
+                /* Global Styles */
+                body {
+                  font-family: Arial, Helvetica, sans-serif;
+                  background-color: #f4f4f4;
+                  padding: 20px;
+                  margin: 0;
+                }
+                .email-container {
+                  max-width: 700px;
+                  margin: 0 auto;
+                  background-color: #ffffff;
+                  border-radius: 12px;
+                  box-shadow: 0 6px 8px rgba(0, 0, 0, 0.1);
+                  overflow: hidden;
+                }
+                .header {
+                  background: linear-gradient(135deg, #1A73E8, #26A69A);
+                  color: white;
+                  text-align: center;
+                  padding: 30px 20px;
+                  position: relative;
+                }
+                .header img {
+                  max-width: 90px;
+                  height: auto;
+                  margin-bottom: 15px;
+                  display: block;
+                  margin-left: auto;
+                  margin-right: auto;
+                  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+                }
+                .header h2 {
+                  margin: 0;
+                  font-size: 24px;
+                }
+                .header p {
+                  margin: 5px 0 0;
+                  font-size: 16px;
+                }
+                .content {
+                  padding: 20px;
+                  font-size: 16px;
+                  line-height: 1.6;
+                  color: #333;
+                }
+                .highlight {
+                  background-color: #eceff1;
+                  padding: 2px 8px;
+                  border-radius: 4px;
+                  font-size: 14px;
+                }
+                  
+                table {
+                  width: 100%;
+                  border-collapse: collapse;
+                  margin: 20px 0;
+                }
+                th, td {
+                  padding: 10px;
+                  text-align: left;
+                  border-bottom: 1px solid #ddd;
+                }
+                th {
+                  background-color: #e7f3ff;
+                  font-weight: bold;
+                  text-transform: uppercase;
+                  font-size: 13px;
+                }
+                .passed {
+                  color: #28a745;
+                  font-weight: bold;
+                }
+                .failed {
+                  color: #dc3545;
+                  font-weight: bold;
+                }
+                /* Tooltip Styles */
+                .tooltip {
+                  position: relative;
+                  display: inline-block;
+                  cursor: help;
+                }
+                .tooltip .tooltiptext {
+                  visibility: hidden;
+                  width: 120px;
+                  background-color: #424242;
+                  color: #fff;
+                  text-align: center;
+                  border-radius: 4px;
+                  padding: 5px;
+                  position: absolute;
+                  z-index: 1;
+                  bottom: 125%;
+                  left: 50%;
+                  margin-left: -60px;
+                  opacity: 0;
+                  transition: opacity 0.3s;
+                  font-size: 12px;
+                }
+                .tooltip:hover .tooltiptext {
+                  visibility: visible;
+                  opacity: 1;
+                }
+                .footer {
+                  text-align: center;
+                  padding: 15px;
+                  font-size: 12px;
+                  color: #888;
+                  background-color: #fafafa;
+                }
+                .footer a {
+                  color: #007BFF;
+                  font-weight: 600;
+                  text-decoration: none;
+                }
+                @media (max-width: 600px) {
+                  .content {
+                    padding: 15px;
+                  }
+                  table {
+                    font-size: 14px;
+                  }
+                  th, td {
+                    padding: 8px;
+                  }
+                }
+              </style>
+            </head>
+            <body style="font-family: Arial, Helvetica, sans-serif; background-color: #f4f4f4; padding: 20px; margin: 0;">
+              <div class="email-container">
+                <div class="header">
+                  <img src="https://i.imgur.com/8yDbN0u.png" alt="Company Logo">
+                  <h2>Automation Test Report</h2>
+                  <p>${{ env.REPORT_DATE }}</p>
+                </div>
+                <div class="content">
+                  <p>Hello Dev Team,</p>
+                  <p>Here’s the latest <span class="highlight">Playwright</span> test run summary. Full details are in the attached <span class="highlight">CSV</span>—check it out for the nitty-gritty.</p>
+                  <table>
+                    <tr>
+                      <th>Metric</th>
+                      <th>Value</th>
+                    </tr>
+                    <tr>
+                      <td>Tests Executed</td>
+                      <td>${{ env.TESTS_RUN }}</td>
+                    </tr>
+                    <tr>
+                      <td>Passed</td>
+                      <td class="passed">${{ env.PASSED_COUNT }}</td>
+                    </tr>
+                    <tr>
+                      <td>Failed <span class="tooltip">⚠<span class="tooltiptext">Investigate logs</span></span></td>
+                      <td class="failed">${{ env.FAILED_COUNT }}</td>
+                    </tr>
+                    <tr>
+                      <td>Skipped</td>
+                      <td>${{ env.SKIPPED_COUNT }}</td>
+                    </tr>
+                  </table>
+                  <p>Dive into the CSV for stack traces and test logs. Let’s squash those bugs!</p>
+                  <p>Cheers,<br><strong>PURPLE Automation Crew</strong></p>
+                </div>
+                <div class="footer">
+                  Built by PURPLE Automation | <a href="mailto:devops@prpl.io">Ping Us</a> | Commit #${{ github.sha }}
+                </div>
+              </div>
+            </body>
+            </html>
+          from: "QA Automation <artyom.l@prpl.io>"
+          to: "brooklynboy2012@hotmail.com"
+          attachments: "automation-test-report-${{ env.REPORT_DATE }}.csv"
