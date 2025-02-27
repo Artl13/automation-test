@@ -20,21 +20,11 @@ jobs:
       TESTS_RUN: "0"
 
     steps:
-      - name: Check day of week
+      - name: Wait 1 minute after Playwright Tests
         if: github.event_name != 'workflow_dispatch'
         run: |
-          DAY_OF_WEEK=$(date -u +%w)  # 0 = Sunday, 5 = Friday, 6 = Saturday
-          if [ "$DAY_OF_WEEK" -eq 5 ] || [ "$DAY_OF_WEEK" -eq 6 ]; then
-            echo "Skipping email report - it's Friday or Saturday"
-            exit 0
-          fi
-
-          - name: Wait 1 minute after Playwright Tests
-          if: github.event_name != 'workflow_dispatch'
-          run: |
-            echo "Waiting 1 minute before sending the report..."
-            sleep 60  # 60 seconds = 1 minute
-    
+          echo "Waiting 1 minute before sending the report..."
+          sleep 60  # 60 seconds = 1 minute
 
       - name: Set Date Variable
         run: echo "REPORT_DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
@@ -67,7 +57,13 @@ jobs:
             ($suite.specs // [])[] as $spec |
             ($spec.tests // [])[] as $test |
             ($test.results // [])[] |
-            [$suite.title, $spec.title, (.status // "unknown"), .duration, ((.errors // []) | if length > 0 then .[0].message else "N/A" end)] | join(",")
+            [
+              $suite.title,
+              $spec.title,
+              (.status // "unknown"),
+              .duration,
+              ((.errors // []) | if length > 0 then .[0].message else "N/A" end)
+            ] | join(",")
           ' playwright-report/playwright-report.json >> "$REPORT_FILE"
           echo "CSV Report saved as $REPORT_FILE"
 
@@ -80,13 +76,12 @@ jobs:
 
           TESTS_RUN=$(jq '[.suites // [] | map(.specs // [] | map(.tests // [] | map(.results // [] | length) | add))] | flatten | add' playwright-report/playwright-report.json | tr -d '[:space:]')
 
-
           if [ "$FAILED_COUNT" -gt 0 ]; then
             echo "EMOJI=❌" >> $GITHUB_ENV
           else
             echo "EMOJI=✅" >> $GITHUB_ENV
           fi
-          
+
           echo "PASSED_COUNT=$PASSED_COUNT" >> $GITHUB_ENV
           echo "FAILED_COUNT=$FAILED_COUNT" >> $GITHUB_ENV
           echo "SKIPPED_COUNT=$SKIPPED_COUNT" >> $GITHUB_ENV
@@ -98,9 +93,9 @@ jobs:
         with:
           server_address: smtp.sendgrid.net
           server_port: 587
-          secure: false  
-          username: apikey 
-          password: ${{ secrets.SENDGRID_API_KEY }} 
+          secure: false
+          username: apikey
+          password: ${{ secrets.SENDGRID_API_KEY }}
           subject: "${{ env.EMOJI }} Automation Testing Report - ${{ env.REPORT_DATE }} (Passed: ${{ env.PASSED_COUNT }}, Failed: ${{ env.FAILED_COUNT }})"
           html_body: |
             <!DOCTYPE html>
@@ -241,7 +236,7 @@ jobs:
             <body style="font-family: Arial, Helvetica, sans-serif; background-color: #f4f4f4; padding: 20px; margin: 0;">
               <div class="email-container">
                 <div class="header">
-                  <img src="https://i.imgur.com/8yDbN0u.png" alt="Company Logo">
+                  <img src="https://i.imgur.com/9qor4iX.png" alt="Company Logo">
                   <h2>Automation Test Report</h2>
                   <p>${{ env.REPORT_DATE }}</p>
                 </div>
