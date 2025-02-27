@@ -29,11 +29,12 @@ jobs:
             exit 0
           fi
 
-      - name: Wait 5 minutes after Playwright Tests
-        if: github.event_name != 'workflow_dispatch'
-        run: |
-          echo "Waiting 5 minutes before sending the report..."
-          sleep 300  # 300 seconds = 5 minutes
+          - name: Wait 1 minute after Playwright Tests
+          if: github.event_name != 'workflow_dispatch'
+          run: |
+            echo "Waiting 1 minute before sending the report..."
+            sleep 60  # 60 seconds = 1 minute
+    
 
       - name: Set Date Variable
         run: echo "REPORT_DATE=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
