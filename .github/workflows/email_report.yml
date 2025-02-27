@@ -275,5 +275,5 @@ jobs:
             </body>
             </html>
           from: "QA Automation <artyom.l@prpl.io>"
-          to: "brooklynboy2012@hotmail.com"
+          to: "artyom.l@prpl.io"
           attachments: "automation-test-report-${{ env.REPORT_DATE }}.csv"
